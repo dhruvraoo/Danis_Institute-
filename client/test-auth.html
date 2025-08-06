@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Simple Auth Test</title>
+</head>
+<body>
+    <h1>Authentication Test</h1>
+    <button onclick="testLogin()">Test Login</button>
+    <button onclick="testAPI()">Test API</button>
+    <div id="result"></div>
+
+    <script>
+        async function testLogin() {
+            try {
+                const response = await fetch('http://127.0.0.1:8000/accounts/api/student/login/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    credentials: 'include',
+                    body: JSON.stringify({
+                        email: 'test@example.com',
+                        password: 'testpass123'
+                    })
+                });
+                
+                const data = await response.json();
+                document.getElementById('result').innerHTML = `
+                    <h3>Login Result:</h3>
+                    <pre>${JSON.stringify(data, null, 2)}</pre>
+                    <p>Cookies: ${document.cookie}</p>
+                `;
+            } catch (error) {
+                document.getElementById('result').innerHTML = `<h3>Error:</h3><pre>${error.message}</pre>`;
+            }
+        }
+
+        async function testAPI() {
+            try {
+                const response = await fetch('http://127.0.0.1:8000/accounts/api/student/marks/', {
+                    credentials: 'include'
+                });
+                
+                const data = await response.json();
+                document.getElementById('result').innerHTML = `
+                    <h3>API Result:</h3>
+                    <pre>${JSON.stringify(data, null, 2)}</pre>
+                    <p>Status: ${response.status}</p>
+                `;
+            } catch (error) {
+                document.getElementById('result').innerHTML = `<h3>API Error:</h3><pre>${error.message}</pre>`;
+            }
+        }
+    </script>
+</body>
+</html>

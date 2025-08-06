@@ -1,0 +1,15 @@
+{% extends 'base.html' %}
+{% block content %}
+  <h1>Latest Educational News</h1>
+  <ul>
+    {% for news in education_news %}
+      <li>
+        <h2><a href="{{ news.url }}" target="_blank">{{ news.title }}</a></h2>
+        <p>{{ news.description }}</p>
+        <hr>
+      </li>
+    {% empty %}
+      <li>No news available.</li>
+    {% endfor %}
+  </ul>
+{% endblock %} 

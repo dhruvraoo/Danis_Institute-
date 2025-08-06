@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .card {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 4px 2px;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        pre {
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+        .error {
+            color: red;
+        }
+        .success {
+            color: green;
+        }
+    </style>
+</head>
+<body>
+    <h1>API Test</h1>
+    
+    <div class="card">
+        <h2>Admin Login</h2>
+        <div>
+            <label for="username">Username:</label>
+            <input type="text" id="username" value="admin">
+        </div>
+        <div>
+            <label for="password">Password:</label>
+            <input type="password" id="password" value="admin123">
+        </div>
+        <button onclick="adminLogin()">Login</button>
+        <div id="loginResult"></div>
+    </div>
+
+    <div class="card">
+        <h2>Test Classes API</h2>
+        <button onclick="testClassesAPI()">Fetch Classes</button>
+        <div id="classesResult"></div>
+    </div>
+
+    <div class="card">
+        <h2>Test Subjects API</h2>
+        <button onclick="testSubjectsAPI()">Fetch Subjects</button>
+        <div id="subjectsResult"></div>
+    </div>
+
+    <div class="card">
+        <h2>Check Session Cookies</h2>
+        <button onclick="checkCookies()">Check Cookies</button>
+        <div id="cookiesResult"></div>
+    </div>
+
+    <script>
+        // Admin login
+        async function adminLogin() {
+            const loginResult = document.getElementById('loginResult');
+            loginResult.innerHTML = 'Logging in...';
+
+            try {
+                const response = await fetch('http://127.0.0.1:8000/accounts/api/admin-login/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    credentials: 'include',
+                    body: JSON.stringify({
+                        username: document.getElementById('username').value,
+                        password: document.getElementById('password').value
+                    })
+                });
+
+                const data = await response.json();
+                
+                if (response.ok && data.success) {
+                    loginResult.innerHTML = `<p class="success">✅ Login successful!</p><pre>${JSON.stringify(data, null, 2)}</pre>`;
+                } else {
+                    loginResult.innerHTML = `<p class="error">❌ Login failed!</p><pre>${JSON.stringify(data, null, 2)}</pre>`;
+                }
+            } catch (error) {
+                loginResult.innerHTML = `<p class="error">❌ Error: ${error.message}</p>`;
+            }
+        }
+
+        // Test classes API
+        async function testClassesAPI() {
+            const classesResult = document.getElementById('classesResult');
+            classesResult.innerHTML = 'Fetching classes...';
+
+            try {
+                const response = await fetch('http://127.0.0.1:8000/accounts/api/admin/classes/', {
+                    credentials: 'include'
+                });
+
+                const data = await response.json();
+                
+                if (response.ok && data.success) {
+                    classesResult.innerHTML = `<p class="success">✅ Found ${data.classes.length} classes!</p><pre>${JSON.stringify(data, null, 2)}</pre>`;
+                } else {
+                    classesResult.innerHTML = `<p class="error">❌ Failed to fetch classes!</p><pre>${JSON.stringify(data, null, 2)}</pre>`;
+                }
+            } catch (error) {
+                classesResult.innerHTML = `<p class="error">❌ Error: ${error.message}</p>`;
+            }
+        }
+
+        // Test subjects API
+        async function testSubjectsAPI() {
+            const subjectsResult = document.getElementById('subjectsResult');
+            subjectsResult.innerHTML = 'Fetching subjects...';
+
+            try {
+                const response = await fetch('http://127.0.0.1:8000/accounts/api/admin/subjects/', {
+                    credentials: 'include'
+                });
+
+                const data = await response.json();
+                
+                if (response.ok && data.success) {
+                    subjectsResult.innerHTML = `<p class="success">✅ Found ${data.subjects.length} subjects!</p><pre>${JSON.stringify(data, null, 2)}</pre>`;
+                } else {
+                    subjectsResult.innerHTML = `<p class="error">❌ Failed to fetch subjects!</p><pre>${JSON.stringify(data, null, 2)}</pre>`;
+                }
+            } catch (error) {
+                subjectsResult.innerHTML = `<p class="error">❌ Error: ${error.message}</p>`;
+            }
+        }
+
+        // Check cookies
+        function checkCookies() {
+            const cookiesResult = document.getElementById('cookiesResult');
+            const cookies = document.cookie;
+            
+            if (cookies) {
+                cookiesResult.innerHTML = `<p>Current cookies:</p><pre>${cookies}</pre>`;
+            } else {
+                cookiesResult.innerHTML = `<p class="error">No cookies found!</p>`;
+            }
+        }
+    </script>
+</body>
+</html>
