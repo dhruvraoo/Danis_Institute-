@@ -10,10 +10,11 @@ interface PrincipalFormData {
 }
 
 interface PrincipalRegistrationFormProps {
+  onSuccess: () => void;
   onBack: () => void;
 }
 
-export default function PrincipalRegistrationForm({ onBack }: PrincipalRegistrationFormProps) {
+export default function PrincipalRegistrationForm({ onSuccess, onBack }: PrincipalRegistrationFormProps) {
   const { toast } = useToast();
   const [formData, setFormData] = useState<PrincipalFormData>({
     name: '',
@@ -57,7 +58,7 @@ export default function PrincipalRegistrationForm({ onBack }: PrincipalRegistrat
     setLoading(true);
     
     try {
-      const response = await fetch('/accounts/api/admin/register-principal/', {
+      const response = await fetch('http://localhost:8000/accounts/api/admin/register-principal/', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -89,7 +90,7 @@ export default function PrincipalRegistrationForm({ onBack }: PrincipalRegistrat
         
         // Go back to selection after a short delay
         setTimeout(() => {
-          onBack();
+          onSuccess();
         }, 1500);
       } else {
         toast({
@@ -126,7 +127,7 @@ export default function PrincipalRegistrationForm({ onBack }: PrincipalRegistrat
       {/* Header */}
       <div className="flex items-center space-x-4 mb-6">
         <button
-          onClick={onBack}
+          onClick={onSuccess}
           className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
         >
           <ArrowLeft className="h-5 w-5 text-gray-600" />

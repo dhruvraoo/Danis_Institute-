@@ -3,16 +3,49 @@ from django.contrib import messages
 from django.http import JsonResponse, FileResponse, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
+from django.conf import settings
+from .models import Student, Faculty, Principal, Class, Subject, AdminUser
+
+# Dashboard Views
+def student_dashboard(request):
+    student = validate_student_session(request)
+    if not student:
+        return redirect('login')
+    return render(request, 'dashboard/student.html', {'student': student})
+
+def faculty_dashboard(request):
+    if 'faculty_id' not in request.session:
+        return redirect('login')
+    try:
+        faculty = Faculty.objects.get(id=request.session['faculty_id'])
+        return render(request, 'dashboard/faculty.html', {'faculty': faculty})
+    except Faculty.DoesNotExist:
+        return redirect('login')
+
+def principal_dashboard(request):
+    if 'principal_id' not in request.session:
+        return redirect('login')
+    try:
+        principal = Principal.objects.get(id=request.session['principal_id'])
+        return render(request, 'dashboard/principal.html', {'principal': principal})
+    except Principal.DoesNotExist:
+        return redirect('login')
 import json
 import os
-from django.conf import settings
-from .models import Student, Faculty, Principal
-from students.models import StudentMark
-from recommendations.models import BookRecommendation
-from functools import wraps
-from django.http import HttpResponse
-from accounts.models import Faculty, Class, Subject
-from django.contrib.auth.hashers import make_password
+import sys
+import re
+
+# Authentication middleware
+def require_admin_auth(view_func):
+    def wrapper(request, *args, **kwargs):
+        if not request.session.get('admin_authenticated'):
+            return JsonResponse({
+                'success': False,
+                'message': 'Admin authentication required',
+                'redirect_to': '/admin/login'
+            }, status=401)
+        return view_func(request, *args, **kwargs)
+    return wrapper
 
 # Authentication helper functions
 def create_authentication_error_response(request, message="Not authenticated", error_code="AUTHENTICATION_REQUIRED"):
@@ -435,70 +468,151 @@ def api_student_login(request):
 @require_http_methods(["POST"])
 def api_faculty_login(request):
     try:
-        print("=== FACULTY LOGIN DEBUG ===")
         data = json.loads(request.body)
-        email = data['email']
-        password = data['password']
-        print(f"Faculty login attempt - Email: {repr(email)}, Password: {repr(password)}")
-
-        try:
-            faculty = Faculty.objects.get(email=email)
-            if faculty.check_password(password):
-                # Store in session
-            request.session['faculty_id'] = faculty.id
-            request.session['faculty_name'] = faculty.name
-            request.session['user_type'] = 'faculty'
-            
-            # Force session save
-            request.session.save()
-            
-            print(f"=== FACULTY LOGIN DEBUG ===")
-            print(f"Faculty logged in: {faculty.name}")
-            print(f"Session key: {request.session.session_key}")
-            print(f"Session data: {dict(request.session)}")
-            
-            # Generate a simple auth token (session key)
-            auth_token = request.session.session_key
-            
-            return JsonResponse({
-                'success': True,
-                'message': f'Welcome back, {faculty.name}!',
-                'auth_token': auth_token,  # Send token to frontend
-                'user': {
-                    'id': faculty.id,
-                    'name': faculty.name,
-                    'email': faculty.email,
-                    'subjects': [
-                        {
-                            'id': subject.id,
-                            'name': subject.name,
-                            'code': subject.code
-                        } for subject in faculty.subjects.all()
-                    ],
-                    'classes': [
-                        {
-                            'id': cls.id,
-                            'name': cls.name,
-                            'grade_level': cls.grade_level
-                        } for cls in faculty.classes.all()
-                    ],
-                    'user_type': 'faculty'
-                }
-            })
-        else:
+        faculty = Faculty.objects.get(email=data.get('email'))
+        
+        if not faculty.check_password(data.get('password')):
             return JsonResponse({
                 'success': False,
-                'message': 'Invalid email or password'
+                'message': 'Invalid password'
             }, status=401)
-        except Faculty.DoesNotExist:
-            return JsonResponse({
-                'success': False,
-                'message': 'Invalid email or password'
-            }, status=401)
+            
+        request.session['faculty_id'] = faculty.id
+        request.session['faculty_name'] = faculty.name
+        request.session['user_type'] = 'faculty'
+        request.session.save()
+        
+        return JsonResponse({
+            'success': True,
+            'message': f'Welcome back, {faculty.name}!',
+            'auth_token': request.session.session_key,
+            'redirect_to': '/teacher-dashboard',  # Add redirect path
+            'user': {
+                'id': faculty.id,
+                'name': faculty.name,
+                'email': faculty.email,
+                'subjects': [{
+                    'id': s.id,
+                    'name': s.name,
+                    'code': s.code
+                } for s in faculty.subjects.all()],
+                'classes': [{
+                    'id': c.id,
+                    'name': c.name,
+                    'grade_level': c.grade_level
+                } for c in faculty.classes.all()],
+                'user_type': 'faculty'
+            }
+        })
+    except Faculty.DoesNotExist:
+        return JsonResponse({
+            'success': False,
+            'message': 'Faculty not found'
+        }, status=401)
     except Exception as e:
         return JsonResponse({
             'success': False,
             'message': f'Login error: {str(e)}'
+        }, status=500)
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def api_faculty_signup(request):
+    try:
+        data = json.loads(request.body)
+        
+        # Check if email already exists
+        if Faculty.objects.filter(email=data['email']).exists():
+            return JsonResponse({
+                'success': False,
+                'message': 'Email already exists'
+            }, status=400)
+            
+        # Create faculty member
+        faculty = Faculty.objects.create(
+            name=data['name'],
+            email=data['email'],
+            password=data['password'],  # In production, use proper password hashing
+            department=data.get('department', ''),
+            employee_id=data.get('employee_id', f"FAC_{data['email'].split('@')[0]}")
+        )
+        
+        # Add subjects if provided
+        if 'subjects' in data:
+            faculty.subjects.set(data['subjects'])
+            
+        # Add classes if provided
+        if 'classes' in data:
+            faculty.classes.set(data['classes'])
+            
+        return JsonResponse({
+            'success': True,
+            'message': 'Faculty account created successfully!',
+            'user': {
+                'id': faculty.id,
+                'name': faculty.name,
+                'email': faculty.email,
+                'department': faculty.department,
+                'employee_id': faculty.employee_id,
+                'user_type': 'faculty'
+            }
+        })
+            
+    except KeyError as e:
+        return JsonResponse({
+            'success': False,
+            'message': f'Missing required field: {str(e)}'
+        }, status=400)
+    except Exception as e:
+        return JsonResponse({
+            'success': False,
+            'message': f'Error creating faculty account: {str(e)}'
+        }, status=500)
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def api_principal_signup(request):
+    try:
+        data = json.loads(request.body)
+        
+        # Check if email already exists
+        if Principal.objects.filter(email=data['email']).exists():
+            return JsonResponse({
+                'success': False,
+                'message': 'Email already exists'
+            }, status=400)
+            
+        # Create principal
+        principal = Principal.objects.create(
+            name=data['name'],
+            email=data['email'],
+            password=data['password'],  # In production, use proper password hashing
+            school_name=data.get('school_name', ''),
+            employee_id=data.get('employee_id', f"PRIN_{data['email'].split('@')[0]}")
+        )
+            
+        return JsonResponse({
+            'success': True,
+            'message': 'Principal account created successfully!',
+            'user': {
+                'id': principal.id,
+                'name': principal.name,
+                'email': principal.email,
+                'school_name': principal.school_name,
+                'employee_id': principal.employee_id,
+                'user_type': 'principal'
+            }
+        })
+            
+    except KeyError as e:
+        return JsonResponse({
+            'success': False,
+            'message': f'Missing required field: {str(e)}'
+        }, status=400)
+    except Exception as e:
+        return JsonResponse({
+            'success': False,
+            'message': f'Error creating principal account: {str(e)}'
         }, status=500)
 
 @csrf_exempt
@@ -511,53 +625,59 @@ def api_principal_login(request):
         password = data['password']
         print(f"Principal login attempt - Email: {repr(email)}, Password: {repr(password)}")
         
-        # Check if principal exists with this email
+        # Find principal by email first
         try:
-            principal_by_email = Principal.objects.get(email=email)
-            print(f"Principal found by email: {principal_by_email.name}")
-            print(f"Stored password: {repr(principal_by_email.password)}")
-            print(f"Provided password: {repr(password)}")
-            print(f"Passwords match: {principal_by_email.password == password}")
+            principal = Principal.objects.get(email=email)
+            print(f"Principal found by email: {principal.name}")
+            
+            # Check password using the proper method
+            if principal.check_password(password):
+                print(f"Password check successful for principal: {principal.name}")
+                
+                # Store in session
+                request.session['principal_id'] = principal.id
+                request.session['principal_name'] = principal.name
+                request.session['user_type'] = 'principal'
+                
+                # Force session save
+                request.session.save()
+                
+                print(f"=== PRINCIPAL LOGIN SUCCESS ===")
+                print(f"Principal logged in: {principal.name}")
+                print(f"Session key: {request.session.session_key}")
+                print(f"Session data: {dict(request.session)}")
+                
+                # Generate a simple auth token (session key)
+                auth_token = request.session.session_key
+                
+                return JsonResponse({
+                    'success': True,
+                    'message': f'Welcome back, {principal.name}!',
+                    'auth_token': auth_token,  # Send token to frontend
+                    'redirect_to': '/dashboard/principal',  # Use the consistent dashboard path
+                    'user': {
+                        'id': principal.id,
+                        'name': principal.name,
+                        'email': principal.email,
+                        'user_type': 'principal'
+                    }
+                })
+            else:
+                print(f"Password check failed for principal: {principal.name}")
+                return JsonResponse({
+                    'success': False,
+                    'message': 'Invalid email or password'
+                }, status=401)
+                
         except Principal.DoesNotExist:
             print(f"No principal found with email: {email}")
-        
-        principal = Principal.objects.filter(email=email, password=password).first()
-        
-        if principal:
-            # Store in session
-            request.session['principal_id'] = principal.id
-            request.session['principal_name'] = principal.name
-            request.session['user_type'] = 'principal'
-            
-            # Force session save
-            request.session.save()
-            
-            print(f"=== PRINCIPAL LOGIN DEBUG ===")
-            print(f"Principal logged in: {principal.name}")
-            print(f"Session key: {request.session.session_key}")
-            print(f"Session data: {dict(request.session)}")
-            
-            # Generate a simple auth token (session key)
-            auth_token = request.session.session_key
-            
-            return JsonResponse({
-                'success': True,
-                'message': f'Welcome back, {principal.name}!',
-                'auth_token': auth_token,  # Send token to frontend
-                'user': {
-                    'id': principal.id,
-                    'name': principal.name,
-                    'email': principal.email,
-                    'user_type': 'principal'
-                }
-            })
-        else:
             return JsonResponse({
                 'success': False,
                 'message': 'Invalid email or password'
             }, status=401)
             
     except Exception as e:
+        print(f"Principal login error: {str(e)}")
         return JsonResponse({
             'success': False,
             'message': f'Login error: {str(e)}'
@@ -950,8 +1070,10 @@ def api_get_student_marks(request):
             return JsonResponse({
                 'success': True,
                 'marks': [],
-                'message': 'No appropriate subjects selected for your grade level. Please select subjects to view marks.',
-                'subjects_count': 0
+                'subject_averages': {},
+                'subjects_count': 0,
+                'total_marks_count': 0,
+                'message': 'No subjects selected for the current grade level'
             })
         
         # Get marks for selected subjects only
@@ -965,32 +1087,22 @@ def api_get_student_marks(request):
         for mark in marks:
             marks_data.append({
                 'id': mark.id,
-                'subject': {
-                    'id': mark.subject.id,
-                    'name': mark.subject.name,
-                    'code': mark.subject.code
-                },
-                'exam_type': mark.exam_type,
-                'marks_obtained': float(mark.marks_obtained),
-                'total_marks': float(mark.total_marks),
-                'percentage': mark.percentage,
-                'grade': mark.grade,
-                'exam_date': mark.exam_date.strftime('%Y-%m-%d'),
-                'created_at': mark.created_at.strftime('%Y-%m-%d %H:%M:%S')
+                'subject': mark.subject.name,
+                'exam_date': mark.exam_date,
+                'marks_obtained': mark.marks_obtained,
+                'total_marks': mark.total_marks,
+                'percentage': (mark.marks_obtained / mark.total_marks) * 100 if mark.total_marks else 0
             })
         
         # Calculate subject-wise averages
         subject_averages = {}
         for subject in student_subjects:
-            subject_marks = marks.filter(subject=subject)
-            if subject_marks.exists():
-                avg_percentage = sum(mark.percentage for mark in subject_marks) / len(subject_marks)
-                subject_averages[subject.id] = {
-                    'subject_name': subject.name,
-                    'subject_code': subject.code,
-                    'average_percentage': round(avg_percentage, 2),
-                    'total_exams': len(subject_marks)
-                }
+            subject_marks = [m for m in marks_data if m['subject'] == subject.name]
+            if subject_marks:
+                avg = sum(m['percentage'] for m in subject_marks) / len(subject_marks)
+                subject_averages[subject.name] = round(avg, 2)
+            else:
+                subject_averages[subject.name] = 0
         
         return JsonResponse({
             'success': True,
@@ -1010,7 +1122,7 @@ def api_get_student_marks(request):
         return JsonResponse({
             'success': False,
             'error_code': 'SERVER_ERROR',
-            'message': f'Error fetching student marks: {str(e)}',
+            'message': f'Error fetching marks: {str(e)}',
             'details': {
                 'error_type': type(e).__name__,
                 'suggested_action': 'Please try again or contact support if the problem persists'
@@ -1030,65 +1142,25 @@ def api_get_book_recommendations(request):
                 "Not authenticated as student", 
                 "STUDENT_AUTHENTICATION_REQUIRED"
             )
-        
-        # Get student's selected subjects that are appropriate for their grade level
-        student_grade = student.student_class.grade_level
-        student_subjects = student.subjects_selected.filter(
-            grade_levels__contains=str(student_grade)
-        )
-        
-        if not student_subjects.exists():
-            return JsonResponse({
-                'success': True,
-                'recommendations': [],
-                'message': 'No subjects selected. Please select subjects to view book recommendations.',
-                'subjects_count': 0
-            })
-        
-        # Get book recommendations for selected subjects and appropriate grade level
+            
+        # Get recommendations for student's subjects
         recommendations = BookRecommendation.objects.filter(
-            subject__in=student_subjects,
-            recommended_for_grade=student_grade,
-            is_available=True
-        ).select_related('subject').order_by('subject__name', 'title')
-        
-        # Format recommendations data
-        recommendations_data = []
-        for rec in recommendations:
-            recommendations_data.append({
-                'id': rec.id,
-                'title': rec.title,
-                'author': rec.author,
-                'subject': {
-                    'id': rec.subject.id,
-                    'name': rec.subject.name,
-                    'code': rec.subject.code
-                },
-                'description': rec.description,
-                'isbn': rec.isbn,
-                'publisher': rec.publisher,
-                'publication_year': rec.publication_year,
-                'price': float(rec.price) if rec.price else None,
-                'display_price': rec.display_price,
-                'recommended_for_grade': rec.recommended_for_grade,
-                'is_available': rec.is_available
-            })
-        
-        # Group recommendations by subject
-        recommendations_by_subject = {}
-        for rec in recommendations_data:
-            subject_name = rec['subject']['name']
-            if subject_name not in recommendations_by_subject:
-                recommendations_by_subject[subject_name] = []
-            recommendations_by_subject[subject_name].append(rec)
+            subject__in=student.subjects_selected.all()
+        ).select_related('subject')
         
         return JsonResponse({
             'success': True,
-            'recommendations': recommendations_data,
-            'recommendations_by_subject': recommendations_by_subject,
-            'subjects_count': len(student_subjects),
-            'total_recommendations': len(recommendations_data),
-            'student_grade': student_grade
+            'recommendations': [
+                {
+                    'id': rec.id,
+                    'title': rec.title,
+                    'author': rec.author,
+                    'subject': rec.subject.name,
+                    'description': rec.description,
+                    'difficulty_level': rec.difficulty_level,
+                    'url': rec.url if hasattr(rec, 'url') else None
+                } for rec in recommendations
+            ]
         })
         
     except Student.DoesNotExist:
@@ -1251,31 +1323,31 @@ def api_check_auth(request):
         # Try to validate student session (handles both cookies and tokens)
         student = validate_student_session(request)
         if student:
-                return JsonResponse({
-                    'success': True,
-                    'authenticated': True,
-                    'user_type': 'student',
-                    'user': {
-                        'id': student.id,
-                        'name': student.name,
-                        'email': student.email,
-                        'roll_id': student.roll_id,
-                        'student_class': {
-                            'id': student.student_class.id,
-                            'name': student.student_class.name,
-                            'grade_level': student.student_class.grade_level,
-                            'section': student.student_class.section
-                        },
-                        'subjects_selected': [
-                            {
-                                'id': subject.id,
-                                'name': subject.name,
-                                'code': subject.code
-                            } for subject in student.subjects_selected.all()
-                        ],
-                        'user_type': 'student'
-                    }
-                })
+            return JsonResponse({
+                'success': True,
+                'authenticated': True,
+                'user_type': 'student',
+                'user': {
+                    'id': student.id,
+                    'name': student.name,
+                    'email': student.email,
+                    'roll_id': student.roll_id,
+                    'student_class': {
+                        'id': student.student_class.id,
+                        'name': student.student_class.name,
+                        'grade_level': student.student_class.grade_level,
+                        'section': student.student_class.section
+                    },
+                    'subjects_selected': [
+                        {
+                            'id': subject.id,
+                            'name': subject.name,
+                            'code': subject.code
+                        } for subject in student.subjects_selected.all()
+                    ],
+                    'user_type': 'student'
+                }
+            })
         
         # No valid student authentication found
         return JsonResponse({
@@ -1675,30 +1747,39 @@ def require_admin_auth(view_func):
     return wrapper
 
 # API endpoint for admin to register new faculty
-@csrf_exempt
-@require_http_methods(["POST"])
+from django.views.decorators.csrf import ensure_csrf_cookie
+
+@ensure_csrf_cookie
+@require_http_methods(["POST", "OPTIONS"])
 @require_admin_auth
 def api_admin_register_faculty(request):
     """
     Admin endpoint to register new faculty members
     """
+    if request.method == "OPTIONS":
+        response = HttpResponse()
+        response["Access-Control-Allow-Origin"] = "http://localhost:8080"
+        response["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+        response["Access-Control-Allow-Headers"] = "Content-Type, X-CSRFToken"
+        return response
+
     try:
         data = json.loads(request.body)
         
         # Validate required fields
-        required_fields = ['name', 'email', 'password']
+        required_fields = ['full_name', 'email', 'password', 'classes', 'subjects']
         for field in required_fields:
-            if not data.get(field):
+            if field not in data:
                 return JsonResponse({
                     'success': False,
                     'message': f'{field.capitalize()} is required'
                 }, status=400)
         
-        name = data['name'].strip()
+        name = data['full_name'].strip()
         email = data['email'].strip().lower()
         password = data['password']
-        class_ids = data.get('class_ids', [])
-        subject_ids = data.get('subject_ids', [])
+        classes = data.get('classes', [])
+        subjects = data.get('subjects', [])
         
         # Validate email format
         import re
@@ -1783,7 +1864,6 @@ def api_admin_register_faculty(request):
 # API endpoint for admin to register new principal
 @csrf_exempt
 @require_http_methods(["POST"])
-@require_admin_auth
 def api_admin_register_principal(request):
     """
     Admin endpoint to register new principals
@@ -1913,3 +1993,59 @@ def api_admin_get_subjects(request):
             'success': False,
             'message': f'Error fetching subjects: {str(e)}'
         }, status=500)
+
+# Create sample faculty and principal accounts for testing
+def create_sample_accounts():
+    try:
+        # Create classes if they don't exist
+        class_10, _ = Class.objects.get_or_create(
+            name="Class 10",
+            defaults={'grade_level': 10, 'section': 'A'}
+        )
+        class_12, _ = Class.objects.get_or_create(
+            name="Class 12",
+            defaults={'grade_level': 12, 'section': 'A'}
+        )
+
+        # Create Math subject if it doesn't exist
+        math_subject, _ = Subject.objects.get_or_create(
+            name="Mathematics",
+            defaults={
+                'code': 'MATH',
+                'grade_levels': '10,12'  # Available for both 10th and 12th
+            }
+        )
+
+        # Create sample faculty
+        faculty, created = Faculty.objects.get_or_create(
+            email="mathteacher@example.com",
+            defaults={
+                'name': "John Smith",
+                'password': "faculty123"  # In production, use proper password hashing
+            }
+        )
+        if created:
+            faculty.subjects.add(math_subject)
+            faculty.classes.add(class_10, class_12)
+            print("Sample faculty created:")
+            print(f"Email: mathteacher@example.com")
+            print(f"Password: faculty123")
+
+        # Create sample principal
+        principal, created = Principal.objects.get_or_create(
+            email="principal@example.com",
+            defaults={
+                'name': "Sarah Johnson",
+                'password': "principal123"  # In production, use proper password hashing
+            }
+        )
+        if created:
+            print("\nSample principal created:")
+            print(f"Email: principal@example.com")
+            print(f"Password: principal123")
+
+    except Exception as e:
+        print(f"Error creating sample accounts: {str(e)}")
+
+# Create sample accounts when the module is loaded
+create_sample_accounts()

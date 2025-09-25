@@ -1,1 +1,0 @@
-# Allows Django to recognize the `management` package and its commands

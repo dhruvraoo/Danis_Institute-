@@ -1,35 +1,26 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { ArrowLeft, GraduationCap, Mail, Lock, Users, BookOpen, CheckCircle, AlertCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import React from 'react';
 
 interface FacultyFormData {
   name: string;
   email: string;
   password: string;
-  selectedClasses: number[];
-  selectedSubjects: number[];
-}
-
-interface Class {
-  id: number;
-  name: string;
-  grade_level: number;
-  section: string;
-}
-
-interface Subject {
-  id: number;
-  name: string;
-  code: string;
-  grade_levels: string;
+  selectedClasses: string[];
+  selectedSubjects: string[];
 }
 
 interface FacultyRegistrationFormProps {
+  onSuccess: () => void;
   onBack: () => void;
 }
 
-export default function FacultyRegistrationForm({ onBack }: FacultyRegistrationFormProps) {
+const AVAILABLE_CLASSES = ['9th', '10th', '11th', '12th'];
+const AVAILABLE_SUBJECTS = ['Maths', 'Science', 'Social Science', 'English', 'Physics', 'Chemistry', 'Biology'];
+
+const FacultyRegistrationForm = ({ onSuccess, onBack }: FacultyRegistrationFormProps) => {
   const { toast } = useToast();
   const [formData, setFormData] = useState<FacultyFormData>({
     name: '',
@@ -38,63 +29,32 @@ export default function FacultyRegistrationForm({ onBack }: FacultyRegistrationF
     selectedClasses: [],
     selectedSubjects: []
   });
-  
-  const [classes, setClasses] = useState<Class[]>([]);
-  const [subjects, setSubjects] = useState<Subject[]>([]);
   const [loading, setLoading] = useState(false);
-  const [dataLoading, setDataLoading] = useState(true);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  // Fetch classes and subjects on component mount
-  useEffect(() => {
-    fetchClassesAndSubjects();
-  }, []);
+  const handleClassToggle = (className: string) => {
+    setFormData(prev => ({
+      ...prev,
+      selectedClasses: prev.selectedClasses.includes(className)
+        ? prev.selectedClasses.filter(c => c !== className)
+        : [...prev.selectedClasses, className]
+    }));
+    // Clear class error if user selects a class
+    if (errors.classes) {
+      setErrors(prev => ({ ...prev, classes: '' }));
+    }
+  };
 
-  const fetchClassesAndSubjects = async () => {
-    try {
-      setDataLoading(true);
-      
-      // Fetch classes
-      const classesResponse = await fetch('/accounts/api/admin/classes/', {
-        credentials: 'include'
-      });
-      const classesData = await classesResponse.json();
-      console.log("Classes Data:", classesData);
-      
-      // Fetch subjects
-      const subjectsResponse = await fetch('/accounts/api/admin/subjects/', {
-        credentials: 'include'
-      });
-      const subjectsData = await subjectsResponse.json();
-      console.log("Subjects Data:", subjectsData);
-      
-      if (classesData.success) {
-        setClasses(classesData.classes);
-      } else {
-        toast({
-          title: "Error",
-          description: "Failed to load classes",
-          variant: "destructive"
-        });
-      }
-      
-      if (subjectsData.success) {
-        setSubjects(subjectsData.subjects);
-      } else {
-        toast({
-          title: "Error", 
-          description: "Failed to load subjects",
-          variant: "destructive"
-        });
-      }
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to load form data",
-        variant: "destructive"
-      });
-    } finally {
-      setDataLoading(false);
+  const handleSubjectToggle = (subject: string) => {
+    setFormData(prev => ({
+      ...prev,
+      selectedSubjects: prev.selectedSubjects.includes(subject)
+        ? prev.selectedSubjects.filter(s => s !== subject)
+        : [...prev.selectedSubjects, subject]
+    }));
+    // Clear subject error if user selects a subject
+    if (errors.subjects) {
+      setErrors(prev => ({ ...prev, subjects: '' }));
     }
   };
 
@@ -139,55 +99,107 @@ export default function FacultyRegistrationForm({ onBack }: FacultyRegistrationF
     setLoading(true);
     
     try {
-      const response = await fetch('/accounts/api/admin/register-faculty/', {
+      // Create AbortController for timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+
+      // Register faculty user with proper Django endpoint
+      const response = await fetch('http://localhost:8080/accounts/api/admin/register-faculty/', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'X-CSRFToken': document.cookie.split('csrftoken=')[1]?.split(';')[0] || '',
+          'Accept': 'application/json'
         },
         credentials: 'include',
+        signal: controller.signal,
         body: JSON.stringify({
-          name: formData.name.trim(),
+          full_name: formData.name.trim(),
           email: formData.email.trim().toLowerCase(),
           password: formData.password,
-          class_ids: formData.selectedClasses,
-          subject_ids: formData.selectedSubjects
+          classes: formData.selectedClasses,
+          subjects: formData.selectedSubjects,
+          user_type: "faculty"
         })
       });
 
-      const data = await response.json();
+      // Clear timeout since response was received
+      clearTimeout(timeoutId);
 
-      if (data.success) {
-        toast({
-          title: "Success",
-          description: "Faculty member registered successfully!",
-          variant: "default"
-        });
-        
-        // Reset form
-        setFormData({
-          name: '',
-          email: '',
-          password: '',
-          selectedClasses: [],
-          selectedSubjects: []
-        });
-        setErrors({});
-        
-        // Go back to selection after a short delay
-        setTimeout(() => {
+      // First log the raw response
+      const responseText = await response.text();
+      console.log('Raw server response:', responseText);
+
+      // Try to parse as JSON
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch (parseError) {
+        console.error('Failed to parse server response as JSON:', parseError);
+        throw new Error(`Server returned invalid JSON: ${responseText.slice(0, 100)}...`);
+      }
+      
+      console.log('Registration response:', { status: response.status, data });
+
+      if (response.ok) {
+        if (data.success) {
+          toast({
+            title: "Success",
+            description: "Faculty member registered successfully!",
+            variant: "default"
+          });
+          
+          // Reset form
+          setFormData({
+            name: '',
+            email: '',
+            password: '',
+            selectedClasses: [],
+            selectedSubjects: []
+          });
+          setErrors({});
+          
+          // Go back to selection immediately
           onBack();
-        }, 1500);
+        } else {
+          // Handle validation errors from Django
+          if (data.errors) {
+            const serverErrors: Record<string, string> = {};
+            Object.entries(data.errors).forEach(([key, value]) => {
+              serverErrors[key] = Array.isArray(value) ? value[0] : value.toString();
+            });
+            setErrors(serverErrors);
+          }
+          toast({
+            title: "Registration Failed",
+            description: data.message || "Please check the form for errors",
+            variant: "destructive"
+          });
+        }
       } else {
         toast({
           title: "Registration Failed",
-          description: data.message || "Failed to register faculty member",
+          description: data.message || "Server error occurred. Please try again.",
           variant: "destructive"
         });
       }
     } catch (error) {
+      console.error('Registration error:', error);
+      // Log the CSRF token to check if it's being sent
+      console.log('CSRF Token:', document.cookie.split('csrftoken=')[1]?.split(';')[0] || 'No CSRF token found');
+      
+      let errorMessage = "Network error occurred. Please try again.";
+      if (error.name === 'AbortError') {
+        errorMessage = "Request timed out. The server took too long to respond.";
+      } else if (error instanceof Response) {
+        errorMessage = `Server responded with status ${error.status}`;
+      } else if (error instanceof Error) {
+        errorMessage = error.message;
+      }
+      
       toast({
         title: "Error",
-        description: "Network error occurred. Please try again.",
+        description: errorMessage,
         variant: "destructive"
       });
     } finally {
@@ -195,35 +207,8 @@ export default function FacultyRegistrationForm({ onBack }: FacultyRegistrationF
     }
   };
 
-  const handleClassToggle = (classId: number) => {
-    setFormData(prev => ({
-      ...prev,
-      selectedClasses: prev.selectedClasses.includes(classId)
-        ? prev.selectedClasses.filter(id => id !== classId)
-        : [...prev.selectedClasses, classId]
-    }));
-    
-    // Clear class error if user selects a class
-    if (errors.classes) {
-      setErrors(prev => ({ ...prev, classes: '' }));
-    }
-  };
-
-  const handleSubjectToggle = (subjectId: number) => {
-    setFormData(prev => ({
-      ...prev,
-      selectedSubjects: prev.selectedSubjects.includes(subjectId)
-        ? prev.selectedSubjects.filter(id => id !== subjectId)
-        : [...prev.selectedSubjects, subjectId]
-    }));
-    
-    // Clear subject error if user selects a subject
-    if (errors.subjects) {
-      setErrors(prev => ({ ...prev, subjects: '' }));
-    }
-  };
-
-  if (dataLoading) {
+  // Remove loading check since we're not fetching data anymore
+  if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-600"></div>
@@ -346,26 +331,22 @@ export default function FacultyRegistrationForm({ onBack }: FacultyRegistrationF
           <label className="block text-sm font-medium text-gray-700 mb-3">
             Assign Classes ({formData.selectedClasses.length} selected)
           </label>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 max-h-48 overflow-y-auto border border-gray-200 rounded-lg p-3">
-            {classes.map((cls) => (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 border border-gray-200 rounded-lg p-3">
+            {AVAILABLE_CLASSES.map((className) => (
               <div
-                key={cls.id}
-                onClick={() => handleClassToggle(cls.id)}
-                className={`p-3 rounded-lg border cursor-pointer transition-all ${
-                  formData.selectedClasses.includes(cls.id)
-                    ? 'border-blue-500 bg-blue-50 text-blue-700'
-                    : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
-                }`}
+                key={className}
+                className="flex items-center space-x-2"
               >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="font-medium text-sm">{cls.name}</p>
-                    <p className="text-xs text-gray-500">Grade {cls.grade_level}</p>
-                  </div>
-                  {formData.selectedClasses.includes(cls.id) && (
-                    <CheckCircle className="h-4 w-4 text-blue-600" />
-                  )}
-                </div>
+                <input
+                  type="checkbox"
+                  id={`class-${className}`}
+                  checked={formData.selectedClasses.includes(className)}
+                  onChange={() => handleClassToggle(className)}
+                  className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                />
+                <label htmlFor={`class-${className}`} className="text-sm text-gray-700">
+                  {className}
+                </label>
               </div>
             ))}
           </div>
@@ -382,26 +363,22 @@ export default function FacultyRegistrationForm({ onBack }: FacultyRegistrationF
           <label className="block text-sm font-medium text-gray-700 mb-3">
             Assign Subjects ({formData.selectedSubjects.length} selected)
           </label>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 max-h-48 overflow-y-auto border border-gray-200 rounded-lg p-3">
-            {subjects.map((subject) => (
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 border border-gray-200 rounded-lg p-3">
+            {AVAILABLE_SUBJECTS.map((subject) => (
               <div
-                key={subject.id}
-                onClick={() => handleSubjectToggle(subject.id)}
-                className={`p-3 rounded-lg border cursor-pointer transition-all ${
-                  formData.selectedSubjects.includes(subject.id)
-                    ? 'border-blue-500 bg-blue-50 text-blue-700'
-                    : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
-                }`}
+                key={subject}
+                className="flex items-center space-x-2"
               >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="font-medium text-sm">{subject.name}</p>
-                    <p className="text-xs text-gray-500">{subject.code}</p>
-                  </div>
-                  {formData.selectedSubjects.includes(subject.id) && (
-                    <CheckCircle className="h-4 w-4 text-blue-600" />
-                  )}
-                </div>
+                <input
+                  type="checkbox"
+                  id={`subject-${subject}`}
+                  checked={formData.selectedSubjects.includes(subject)}
+                  onChange={() => handleSubjectToggle(subject)}
+                  className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                />
+                <label htmlFor={`subject-${subject}`} className="text-sm text-gray-700">
+                  {subject}
+                </label>
               </div>
             ))}
           </div>
@@ -443,4 +420,6 @@ export default function FacultyRegistrationForm({ onBack }: FacultyRegistrationF
       </form>
     </motion.div>
   );
-}
+};
+
+export default FacultyRegistrationForm;

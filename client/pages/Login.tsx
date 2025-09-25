@@ -1,7 +1,7 @@
 import Navigation from "@/components/Navigation";
 import Footer from "@/components/Footer";
 import { motion } from "framer-motion";
-import { LogIn, User, Eye, EyeOff } from "lucide-react";
+import { LogIn, User, Eye, EyeOff, Shield, GraduationCap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -82,26 +82,40 @@ export default function Login() {
     setError("");
     clearError();
 
-    const success = await login(formData.email, formData.password, selectedUserType);
-    
-    if (success) {
-      // Small delay to ensure session cookies are set
-      setTimeout(() => {
-        // Redirect to appropriate dashboard
-        switch (selectedUserType) {
-          case 'student':
-            navigate('/student-dashboard');
-            break;
-          case 'faculty':
-            navigate('/teacher-dashboard');
-            break;
-          case 'principal':
-            navigate('/principal-dashboard');
-            break;
+    try {
+      const response = await fetch(`http://127.0.0.1:8000/accounts/api/${selectedUserType}/login/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify(formData),
+      });
+
+      const data = await response.json();
+      console.log('🔐 Login response:', data);
+
+      if (data.success) {
+        localStorage.setItem("user", JSON.stringify(data.user));
+        if (data.auth_token) {
+          localStorage.setItem('auth_token', data.auth_token);
         }
-      }, 100); // 100ms delay
-    } else {
-      setError(authError || "Login failed");
+
+        // Use the backend's redirect_to or fallback to default routes
+        const redirectPath = data.redirect_to || {
+          'student': '/dashboard/student',
+          'faculty': '/dashboard/teacher',
+          'principal': '/dashboard/principal'
+        }[selectedUserType] || '/';
+
+        console.log('🔄 Redirecting to:', redirectPath);
+        window.location.href = redirectPath;
+      } else {
+        setError(data.message || "Login failed");
+      }
+    } catch (err) {
+      console.error('Login error:', err);
+      setError("Network error. Please try again.");
     }
   };
 
@@ -187,26 +201,61 @@ export default function Login() {
                   ) : (
                     // Show all login options for regular users
                     <>
-                      <div className="text-center">
-                        <User className="h-8 w-8 text-blue-400 mx-auto mb-3" />
-                        <h3 className="font-semibold text-blue-900 mb-2">
-                          Student Portal
-                        </h3>
-                        <p className="text-gray-600 text-sm mb-4">
-                          
-                        </p>
-                        <Button 
-                          className="w-full mt-3" 
-                          onClick={() => {
-                            console.log('🔘 Student Login button clicked');
-                            setSelectedUserType('student');
-                          }}
-                        >
-                          Student Login
-                        </Button>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {/* Student Login */}
+                        <div className="text-center p-4 rounded-lg border border-gray-200 hover:border-blue-500 transition-colors">
+                          <User className="h-8 w-8 text-blue-400 mx-auto mb-3" />
+                          <h3 className="font-semibold text-blue-900 mb-2">
+                            Student Portal
+                          </h3>
+                          <Button 
+                            className="w-full mt-3 bg-blue-500 hover:bg-blue-600" 
+                            onClick={() => {
+                              console.log('🔘 Student Login selected');
+                              setSelectedUserType('student');
+                            }}
+                          >
+                            Student Login
+                          </Button>
+                        </div>
+
+                        {/* Faculty Login */}
+                        <div className="text-center p-4 rounded-lg border border-gray-200 hover:border-green-500 transition-colors">
+                          <GraduationCap className="h-8 w-8 text-green-400 mx-auto mb-3" />
+                          <h3 className="font-semibold text-green-900 mb-2">
+                            Faculty Portal
+                          </h3>
+                          <Button 
+                            className="w-full mt-3 bg-green-500 hover:bg-green-600" 
+                            onClick={() => {
+                              console.log('🔘 Faculty Login selected');
+                              setSelectedUserType('faculty');
+                            }}
+                          >
+                            Faculty Login
+                          </Button>
+                        </div>
+
+                        {/* Principal Login */}
+                        <div className="text-center p-4 rounded-lg border border-gray-200 hover:border-purple-500 transition-colors">
+                          <Shield className="h-8 w-8 text-purple-400 mx-auto mb-3" />
+                          <h3 className="font-semibold text-purple-900 mb-2">
+                            Principal Portal
+                          </h3>
+                          <Button 
+                            className="w-full mt-3 bg-purple-500 hover:bg-purple-600" 
+                            onClick={() => {
+                              console.log('🔘 Principal Login selected');
+                              setSelectedUserType('principal');
+                            }}
+                          >
+                            Principal Login
+                          </Button>
+                        </div>
                       </div>
 
-                      <div className="text-center pt-4">
+                      {/* Sign up link */}
+                      <div className="text-center pt-6">
                         <p className="text-gray-600 text-sm">
                           Don't have an account?{" "}
                           <Link

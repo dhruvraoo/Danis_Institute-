@@ -44,6 +44,13 @@ class PrincipalAdmin(admin.ModelAdmin):
     list_display = ('name', 'email')
     search_fields = ('name', 'email')
     ordering = ('name',)
+    
+    def save_model(self, request, obj, form, change):
+        # Hash password if it's being changed and not already hashed
+        if 'password' in form.changed_data:
+            if not obj.password.startswith(('pbkdf2_', 'bcrypt', 'argon2')):
+                obj.set_password(obj.password)
+        super().save_model(request, obj, form, change)
 
 
 @admin.register(AdminUser)

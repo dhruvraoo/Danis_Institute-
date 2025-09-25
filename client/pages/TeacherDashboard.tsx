@@ -1,5 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "@/contexts/AuthContext";
 import Navigation from "@/components/Navigation";
+import LoadingScreen from "@/components/LoadingScreen";
 import { motion } from "framer-motion";
 import {
   Users,
@@ -87,6 +90,28 @@ const studentFeedback = [
 ];
 
 export default function TeacherDashboard() {
+  const { user, loading } = useAuth();
+  const navigate = useNavigate();
+  
+  // Authentication check
+  useEffect(() => {
+    if (!loading && (!user || user.user_type !== 'faculty')) {
+      console.log('TeacherDashboard: Authentication failed, redirecting to login');
+      console.log('TeacherDashboard: User:', user);
+      navigate('/login');
+    }
+  }, [user, loading, navigate]);
+
+  // Show loading screen while checking authentication
+  if (loading) {
+    return <LoadingScreen />;
+  }
+
+  // Don't render anything if user is not authenticated
+  if (!user || user.user_type !== 'faculty') {
+    return null;
+  }
+
   const [students, setStudents] = useState(initialStudents);
   const [marks, setMarks] = useState(initialMarks);
   const [newStudent, setNewStudent] = useState({
@@ -153,6 +178,9 @@ export default function TeacherDashboard() {
             className="mb-8"
           >
             <div className="flex items-center space-x-4 mb-6">
+              <h1 className="text-3xl font-bold text-gray-900">
+                Welcome, {user.name}!
+              </h1>
               <div className="w-16 h-16 bg-gradient-to-br from-green-500 to-green-700 rounded-xl flex items-center justify-center">
                 <GraduationCap className="h-8 w-8 text-white" />
               </div>
